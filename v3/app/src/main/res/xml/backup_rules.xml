@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Reglas de copia de seguridad para Android 11 y anteriores. -->
+<full-backup-content>
+    <include domain="database" path="control_hornos.db" />
+    <include domain="sharedpref" path="settings.xml" />
+</full-backup-content>

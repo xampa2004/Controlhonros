@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Reglas de copia de seguridad y transferencia de dispositivo para Android 12+. -->
+<data-extraction-rules>
+    <cloud-backup>
+        <include domain="database" path="control_hornos.db" />
+        <include domain="sharedpref" path="settings.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <include domain="database" path="control_hornos.db" />
+        <include domain="sharedpref" path="settings.xml" />
+    </device-transfer>
+</data-extraction-rules>
