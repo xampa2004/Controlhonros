@@ -7,6 +7,7 @@ import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.*;
 import android.provider.Settings;
+import android.text.InputType;
 import android.view.*;
 import android.widget.*;
 import java.text.SimpleDateFormat;
@@ -243,7 +244,7 @@ public class MainActivity extends Activity {
         TextView h=txt(oven.name.toUpperCase(Locale.getDefault()),18,dark,true);
         h.setOnClickListener(v->editOvenDialog(oven));
         head.addView(h,new LinearLayout.LayoutParams(0,-2,1));
-        Button cycle=button("CICLO: "+cycleText(oven.minutes),0xffe8eef5,dark);
+        Button cycle=button("CICLO: "+Db.dur(oven.minutes),0xffe8eef5,dark);
         head.addView(cycle);cycle.setOnClickListener(v->editCycle(oven));
 
         Button details=button(ovenDetails(oven),0xffeef2f7,dark);
@@ -386,20 +387,18 @@ public class MainActivity extends Activity {
     }
 
     private void editCycle(Oven oven){
-        LinearLayout box=new LinearLayout(this);box.setPadding(dp(8),dp(8),dp(8),dp(8));
-        NumberPicker h=new NumberPicker(this),m=new NumberPicker(this);
-        h.setMinValue(0);h.setMaxValue(999);m.setMinValue(0);m.setMaxValue(59);
-        h.setValue(oven.minutes/60);m.setValue(oven.minutes%60);
-        box.addView(h,new LinearLayout.LayoutParams(0,dp(100),1));box.addView(m,new LinearLayout.LayoutParams(0,dp(100),1));
         LinearLayout wrap=new LinearLayout(this);wrap.setOrientation(LinearLayout.VERTICAL);
-        TextView labels=txt("Horas                         Minutos",13,grey,true);wrap.addView(labels);wrap.addView(box);
+        wrap.setPadding(dp(18),dp(8),dp(18),0);
+        EditText[] f=addDurationInputs(wrap,oven.minutes);
         TextView warn=txt("Esto solo afecta a las tiradas nuevas. Las ya registradas conservan su hora de salida.",12,grey,false);
-        warn.setPadding(0,dp(8),0,0);wrap.addView(warn);
+        warn.setPadding(0,dp(10),0,0);wrap.addView(warn);
         AlertDialog d=new AlertDialog.Builder(this).setTitle("Duración del ciclo · "+oven.name).setView(wrap)
             .setNegativeButton("Cancelar",null).setPositiveButton("Guardar",null).create();
         d.setOnShowListener(s->d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{
-            if(h.getValue()==0 && m.getValue()==0){toast("El ciclo debe ser superior a cero.");return;}
-            db.setOvenMinutes(oven.id, h.getValue()*60+m.getValue());
+            long minutes=durationMinutes(f);
+            if(minutes<=0){toast("El ciclo debe ser superior a cero.");return;}
+            if(minutes>MAX_MINUTES){toast("Como máximo un año (365 días).");return;}
+            db.setOvenMinutes(oven.id,(int)minutes);
             d.dismiss();render();
         }));
         d.show();
@@ -421,26 +420,20 @@ public class MainActivity extends Activity {
     /** Si se olvidó pulsar TIRAR: se indica lo que le queda y la entrada se calcula hacia atrás. */
     private void addRunningDialog(Oven oven){
         if(oven.minutes<=0){toast("Configura primero la duración del ciclo del horno.");editCycle(oven);return;}
-        NumberPicker h=new NumberPicker(this),m=new NumberPicker(this);
-        h.setMinValue(0);h.setMaxValue(99);m.setMinValue(0);m.setMaxValue(59);
-        h.setValue(0);m.setValue(Math.min(59,oven.minutes));
-        LinearLayout box=new LinearLayout(this);
-        box.addView(h,new LinearLayout.LayoutParams(0,dp(100),1));
-        box.addView(m,new LinearLayout.LayoutParams(0,dp(100),1));
         EditText desc=new EditText(this);desc.setHint("Descripción opcional (ej. bizcocho de la abuela)");
         LinearLayout wrap=new LinearLayout(this);wrap.setOrientation(LinearLayout.VERTICAL);wrap.setPadding(dp(18),dp(8),dp(18),0);
         wrap.addView(txt("Tiempo que le queda en el horno",13,grey,true));
-        wrap.addView(txt("Horas                              Minutos",12,grey,true));
-        wrap.addView(box);wrap.addView(desc);
-        TextView note=txt("La hora de entrada se calcula hacia atrás con el ciclo de "+cycleText(oven.minutes)+".",12,grey,false);
+        EditText[] f=addDurationInputs(wrap,Math.min(60,oven.minutes-1));
+        wrap.addView(desc);
+        TextView note=txt("La hora de entrada se calcula hacia atrás con el ciclo de "+Db.dur(oven.minutes)+".",12,grey,false);
         note.setPadding(0,dp(8),0,0);wrap.addView(note);
 
         AlertDialog d=new AlertDialog.Builder(this).setTitle("Tirada ya en marcha · "+oven.name).setView(wrap)
             .setNegativeButton("Cancelar",null).setPositiveButton("Guardar",null).create();
         d.setOnShowListener(s->d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{
-            int remain=h.getValue()*60+m.getValue();
+            long remain=durationMinutes(f);
             if(remain<=0){toast("Indica cuánto tiempo le queda (más de cero).");return;}
-            if(remain>=oven.minutes){toast("No puede quedar más tiempo que el ciclo completo ("+cycleText(oven.minutes)+").");return;}
+            if(remain>=oven.minutes){toast("No puede quedar más tiempo que el ciclo completo ("+Db.dur(oven.minutes)+").");return;}
             long now=System.currentTimeMillis();
             long end=now+remain*60000L;
             long start=end-oven.minutes*60000L;
@@ -453,6 +446,43 @@ public class MainActivity extends Activity {
             toast("Tirada guardada. Sale a las "+fmt.format(new Date(end))+".");
         }));
         d.show();
+    }
+
+    private static final long MAX_MINUTES=365*1440;
+
+    /** Tres campos numéricos Días / Horas / Min en una fila; devuelve [días, horas, minutos]. */
+    private EditText[] addDurationInputs(LinearLayout parent,int total){
+        EditText days=numField(total/1440), hours=numField((total%1440)/60), mins=numField(total%60);
+        LinearLayout row=new LinearLayout(this);
+        row.addView(fieldColumn("Días",days),new LinearLayout.LayoutParams(0,-2,1));
+        LinearLayout.LayoutParams hp=new LinearLayout.LayoutParams(0,-2,1);hp.leftMargin=dp(8);
+        row.addView(fieldColumn("Horas",hours),hp);
+        LinearLayout.LayoutParams mp=new LinearLayout.LayoutParams(0,-2,1);mp.leftMargin=dp(8);
+        row.addView(fieldColumn("Min",mins),mp);
+        parent.addView(row);
+        return new EditText[]{days,hours,mins};
+    }
+    private LinearLayout fieldColumn(String label,EditText field){
+        LinearLayout col=new LinearLayout(this);col.setOrientation(LinearLayout.VERTICAL);
+        TextView t=txt(label,12,grey,true);t.setPadding(dp(4),0,0,0);col.addView(t);col.addView(field);
+        return col;
+    }
+    private EditText numField(int value){
+        EditText e=new EditText(this);
+        e.setInputType(InputType.TYPE_CLASS_NUMBER);
+        e.setSelectAllOnFocus(true);
+        e.setText(String.valueOf(value));
+        return e;
+    }
+    /** Suma los tres campos en minutos; un valor absurdo cae en MAX_MINUTES+1 y no desborda. */
+    private long durationMinutes(EditText[] f){
+        try{
+            return Long.parseLong(f[0].getText().toString().trim().isEmpty()?"0":f[0].getText().toString().trim())*1440L
+                 + Long.parseLong(f[1].getText().toString().trim().isEmpty()?"0":f[1].getText().toString().trim())*60L
+                 + Long.parseLong(f[2].getText().toString().trim().isEmpty()?"0":f[2].getText().toString().trim());
+        } catch(NumberFormatException ex){
+            return MAX_MINUTES+1;
+        }
     }
 
     private void editPiece(Piece p,Oven oven){
@@ -497,7 +527,6 @@ public class MainActivity extends Activity {
         d.show();
     }
 
-    private String cycleText(int minutes){return String.format(Locale.getDefault(),"%02d:%02d",minutes/60,minutes%60);}
     private String remaining(long ms){if(ms<=0)return "00:00:00";long s=ms/1000;return String.format(Locale.getDefault(),"%02d:%02d:%02d",s/3600,(s%3600)/60,s%60);}
     private TextView txt(String s,int size,int color,boolean bold){TextView t=new TextView(this);t.setText(s);t.setTextSize(size);t.setTextColor(color);if(bold)t.setTypeface(null,1);return t;}
     private Button button(String s,int bg,int fg){Button b=new Button(this);b.setText(s);b.setTextSize(12);b.setTextColor(fg);b.setAllCaps(false);b.setBackground(round(bg,dp(9)));b.setPadding(dp(8),0,dp(8),0);return b;}

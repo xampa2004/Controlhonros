@@ -25,7 +25,7 @@ class Piece {
     }
     /** "60 min · 180 ºC · Bizcocho · 20 cm" sin los datos vacíos. */
     String details(){
-        StringBuilder sb=new StringBuilder(duration+" min");
+        StringBuilder sb=new StringBuilder(Db.dur(duration));
         if(!temp.isEmpty()) sb.append(" · ").append(temp);
         if(!curve.isEmpty()) sb.append(" · Curva ").append(curve);
         if(!format.isEmpty()) sb.append(" · ").append(format);
@@ -116,6 +116,16 @@ class Db extends SQLiteOpenHelper {
     }
 
     // ---- Tiradas ----
+    /** Duración legible: "2 d 5 h 30 min", "5 h", "90 min". */
+    static String dur(int minutes){
+        if(minutes<=0) return "0 min";
+        int d=minutes/1440, h=(minutes%1440)/60, m=minutes%60;
+        StringBuilder sb=new StringBuilder();
+        if(d>0) sb.append(d).append(" d");
+        if(h>0) sb.append(sb.length()>0?" ":"").append(h).append(" h");
+        if(m>0) sb.append(sb.length()>0?" ":"").append(m).append(" min");
+        return sb.toString();
+    }
     long add(long ovenId,long start,long end,String desc,int duration,String temp,String curve,String format){
         ContentValues v=new ContentValues();
         v.put("oven_id",ovenId); v.put("start",start); v.put("end",end); v.put("description",desc);
