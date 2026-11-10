@@ -7,8 +7,8 @@ android {
         applicationId 'es.controlhornos.app'
         minSdk 26
         targetSdk 35
-        versionCode 3
-        versionName '3.1'
+        versionCode 4
+        versionName '3.2'
     }
     signingConfigs {
         // Firma de verdad (no la de depuración): Play Protect es menos quisquilloso y la app no es "debuggable".

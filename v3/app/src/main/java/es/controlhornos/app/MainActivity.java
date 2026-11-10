@@ -4,6 +4,7 @@ import android.Manifest;
 import android.app.*;
 import android.content.*;
 import android.content.pm.PackageManager;
+import android.media.RingtoneManager;
 import android.net.Uri;
 import android.os.*;
 import android.provider.Settings;
@@ -17,6 +18,8 @@ public class MainActivity extends Activity {
     private Db db;
     private LinearLayout root, content;
     private TextView permissionBanner;
+    private Button soundButton;
+    private static final int REQ_SOUND=20;
     private final Handler handler=new Handler();
     private final SimpleDateFormat fmt=new SimpleDateFormat("dd/MM/yyyy HH:mm",new Locale("es","ES"));
     private final Runnable ticker=()->{render();handler.postDelayed(this.ticker,1000);};
@@ -88,15 +91,47 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams pbp=matchWrap();pbp.topMargin=dp(8);
         root.addView(permissions,pbp);
 
+        soundButton=button("SONIDO DEL AVISO: "+soundName(),0xffe3edf7,dark);
+        soundButton.setOnClickListener(v->pickSound());
+        LinearLayout.LayoutParams sbp=matchWrap();sbp.topMargin=dp(8);
+        root.addView(soundButton,sbp);
+
         Button addOven=button("+ AÑADIR HORNO",0xffe3edf7,dark);
         LinearLayout.LayoutParams aop=matchWrap();aop.topMargin=dp(8);
         addOven.setOnClickListener(v->addOvenDialog());
         root.addView(addOven,aop);
 
         content=new LinearLayout(this);content.setOrientation(LinearLayout.VERTICAL);root.addView(content);
+    }
 
-        TextView note=txt("Mantén la aplicación instalada y permite las notificaciones y alarmas. En OPPO, desactiva también la restricción de batería para esta app.",12,grey,false);
-        note.setPadding(dp(2),dp(14),dp(2),0);root.addView(note);
+    /** Selector del sistema: alarmas, tonos o silencio. */
+    private void pickSound(){
+        Intent i=new Intent(RingtoneManager.ACTION_RINGTONE_PICKER)
+            .putExtra(RingtoneManager.EXTRA_RINGTONE_TYPE,RingtoneManager.TYPE_ALARM)
+            .putExtra(RingtoneManager.EXTRA_RINGTONE_TITLE,"Sonido del aviso de fin de ciclo")
+            .putExtra(RingtoneManager.EXTRA_RINGTONE_SHOW_SILENT,true)
+            .putExtra(RingtoneManager.EXTRA_RINGTONE_SHOW_DEFAULT,true)
+            .putExtra(RingtoneManager.EXTRA_RINGTONE_EXISTING_URI,AlarmReceiver.sound(this));
+        try{ startActivityForResult(i,REQ_SOUND); }
+        catch(Exception e){ toast("Este móvil no trae selector de sonidos."); }
+    }
+    @Override protected void onActivityResult(int req,int res,Intent data){
+        super.onActivityResult(req,res,data);
+        if(req!=REQ_SOUND||res!=RESULT_OK||data==null) return;
+        Uri picked=data.getParcelableExtra(RingtoneManager.EXTRA_RINGTONE_PICKED_URI);
+        getSharedPreferences("ajustes",0).edit().putString("alarma_uri",picked==null?"":picked.toString()).apply();
+        soundButton.setText("SONIDO DEL AVISO: "+soundName());
+        toast("Sonido guardado: "+soundName()+". Se aplica al siguiente aviso.");
+    }
+    private String soundName(){
+        String s=getSharedPreferences("ajustes",0).getString("alarma_uri",null);
+        if(s==null) return "predeterminado";
+        if(s.isEmpty()) return "sin sonido";
+        try{
+            android.media.Ringtone r=RingtoneManager.getRingtone(this,Uri.parse(s));
+            String t=r==null?null:r.getTitle(this);
+            return t==null||t.isEmpty()?"elegido":t;
+        }catch(Exception e){ return "elegido"; }
     }
 
     private void requestNotificationPermissionIfNeeded(){
