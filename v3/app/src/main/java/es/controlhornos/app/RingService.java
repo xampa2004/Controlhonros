@@ -10,11 +10,11 @@ import android.util.Log;
 
 /**
  * Insiste con el aviso hasta que se atiende: suena una vez y vuelve a sonar un minuto después,
- * así hasta una hora. Se para antes si se abre la app o se descarta la notificación.
+ * así hasta cuatro minutos. Se para antes si se abre la app o se descarta la notificación.
  */
 public class RingService extends Service {
     private static final long GAP_MS=60000L;       // espera entre un aviso y el siguiente
-    private static final long MAX_MS=60*60000L;    // deja de insistir tras una hora
+    private static final long MAX_MS=4*60000L;     // deja de insistir a los 4 minutos
     private MediaPlayer player;
     private Vibrator vibrator;
     private final Handler handler=new Handler(Looper.getMainLooper());
