@@ -56,7 +56,10 @@ public class RingService extends Service {
         }catch(Exception e){
             Log.w("RingService","sin primer plano",e);
         }
-        play();
+        // El primer aviso ya lo da la notificación (su canal trae sonido y vibración):
+        // aquí solo se prepara la repetición, para no sonar dos veces a la vez.
+        handler.removeCallbacks(ring);
+        handler.postDelayed(ring,GAP_MS);
         handler.removeCallbacks(timeout);
         handler.postDelayed(timeout,MAX_MS);
         return START_NOT_STICKY;
@@ -67,7 +70,6 @@ public class RingService extends Service {
         stopPlaying();
         handler.removeCallbacks(ring);
         Uri u=AlarmReceiver.sound(this);
-        boolean suena=false;
         if(u!=null){
             try{
                 player=new MediaPlayer();
@@ -77,23 +79,22 @@ public class RingService extends Service {
                     .build());
                 player.setDataSource(this,u);
                 player.setLooping(false);
-                player.setOnCompletionListener(mp-> handler.postDelayed(ring,GAP_MS));
                 player.prepare();
                 player.start();
-                suena=true;
+                // Siguiente aviso un minuto después de que empiece éste, no de que acabe.
+                handler.postDelayed(ring,Math.max(1000L,GAP_MS-player.getDuration()));
             }catch(Exception e){
                 Log.w("RingService","no se pudo reproducir "+u,e);
                 releasePlayer();
             }
         }
+        if(player==null) handler.postDelayed(ring,GAP_MS); // silencio o error: se reintenta igual
         if(AlarmReceiver.vibrate(this)){
             try{
                 vibrator=(Vibrator)getSystemService(VIBRATOR_SERVICE);
                 vibrator.vibrate(VibrationEffect.createWaveform(new long[]{0,700,500},-1));
             }catch(Exception ignored){}
         }
-        // Sin tono (silencio o error) no hay fin de reproducción que avise: se reprograma aquí.
-        if(!suena) handler.postDelayed(ring,GAP_MS);
     }
 
     private void releasePlayer(){
