@@ -61,7 +61,8 @@ public class RingService extends Service {
         handler.removeCallbacks(ring);
         handler.postDelayed(ring,GAP_MS);
         handler.removeCallbacks(timeout);
-        handler.postDelayed(timeout,MAX_MS);
+        // Cuatro minutos de insistencia, más lo que tarde el último aviso en sonar entero.
+        handler.postDelayed(timeout,MAX_MS+45000L);
         return START_NOT_STICKY;
     }
 
