@@ -19,7 +19,10 @@ public class MainActivity extends Activity {
     private LinearLayout root, content;
     private TextView permissionBanner;
     private Button soundButton;
+    private Button repeatButton;
+    private Button vibrateButton;
     private static final int REQ_SOUND=20;
+    private static final int REQ_CSV=21;
     private final Handler handler=new Handler();
     private final SimpleDateFormat fmt=new SimpleDateFormat("dd/MM/yyyy HH:mm",new Locale("es","ES"));
     private final Runnable ticker=()->{render();handler.postDelayed(this.ticker,1000);};
@@ -47,6 +50,7 @@ public class MainActivity extends Activity {
     }
     @Override protected void onResume(){
         super.onResume();
+        RingService.stop(this); // abrir la app es "atender" el aviso: se calla el sonido repetido
         render();
         handler.removeCallbacks(ticker);
         handler.postDelayed(ticker,1000);
@@ -96,6 +100,27 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams sbp=matchWrap();sbp.topMargin=dp(8);
         root.addView(soundButton,sbp);
 
+        LinearLayout toggles=new LinearLayout(this);toggles.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams tgp=matchWrap();tgp.topMargin=dp(8);root.addView(toggles,tgp);
+        repeatButton=button(repeatLabel(),0xffe3edf7,dark);
+        toggles.addView(repeatButton,new LinearLayout.LayoutParams(0,dp(44),1));
+        repeatButton.setOnClickListener(v->{
+            boolean on=!AlarmReceiver.repeat(this);
+            getSharedPreferences("ajustes",0).edit().putString("repetir",on?"1":"0").apply();
+            repeatButton.setText(repeatLabel());
+            toast(on?"El sonido insistirá hasta que atiendas el aviso (máximo 5 minutos)."
+                   :"El sonido sonará una sola vez.");
+        });
+        vibrateButton=button(vibrateLabel(),0xffe3edf7,dark);
+        LinearLayout.LayoutParams vbp=new LinearLayout.LayoutParams(0,dp(44),1);vbp.leftMargin=dp(8);
+        toggles.addView(vibrateButton,vbp);
+        vibrateButton.setOnClickListener(v->{
+            boolean on=!AlarmReceiver.vibrate(this);
+            getSharedPreferences("ajustes",0).edit().putString("vibrar",on?"1":"0").apply();
+            vibrateButton.setText(vibrateLabel());
+            toast("Vibración "+(on?"activada":"desactivada")+". Se aplica al siguiente aviso.");
+        });
+
         Button addOven=button("+ AÑADIR HORNO",0xffe3edf7,dark);
         LinearLayout.LayoutParams aop=matchWrap();aop.topMargin=dp(8);
         addOven.setOnClickListener(v->addOvenDialog());
@@ -117,12 +142,19 @@ public class MainActivity extends Activity {
     }
     @Override protected void onActivityResult(int req,int res,Intent data){
         super.onActivityResult(req,res,data);
+        if(req==REQ_CSV){
+            if(res==RESULT_OK&&data!=null&&data.getData()!=null) writeCsv(data.getData());
+            return;
+        }
         if(req!=REQ_SOUND||res!=RESULT_OK||data==null) return;
         Uri picked=data.getParcelableExtra(RingtoneManager.EXTRA_RINGTONE_PICKED_URI);
         getSharedPreferences("ajustes",0).edit().putString("alarma_uri",picked==null?"":picked.toString()).apply();
         soundButton.setText("SONIDO DEL AVISO: "+soundName());
         toast("Sonido guardado: "+soundName()+". Se aplica al siguiente aviso.");
     }
+
+    private String repeatLabel(){ return "REPETIR: "+(AlarmReceiver.repeat(this)?"SÍ":"NO"); }
+    private String vibrateLabel(){ return "VIBRAR: "+(AlarmReceiver.vibrate(this)?"SÍ":"NO"); }
     private String soundName(){
         String s=getSharedPreferences("ajustes",0).getString("alarma_uri",null);
         if(s==null) return "predeterminado";
@@ -243,25 +275,94 @@ public class MainActivity extends Activity {
         LinearLayout panel=card();
         LinearLayout head=new LinearLayout(this);head.setGravity(Gravity.CENTER_VERTICAL);panel.addView(head);
         head.addView(txt("HISTORIAL",15,dark,true),new LinearLayout.LayoutParams(0,-2,1));
+        Button csv=button("EXPORTAR",0xffe3edf7,dark);
+        csv.setOnClickListener(v->exportCsv());
+        head.addView(csv);
         Button clear=button("VACIAR",0xfffbe3e0,red);
+        LinearLayout.LayoutParams clp=new LinearLayout.LayoutParams(-2,dp(36));clp.leftMargin=dp(8);
         clear.setOnClickListener(v-> new AlertDialog.Builder(this).setTitle("¿Vaciar el historial?")
             .setMessage("Se borrarán las "+hist.size()+" tiradas recogidas. Los hornos y las tiradas activas no se tocan.")
             .setNegativeButton("Cancelar",null)
             .setPositiveButton("Vaciar",(d,w)->{db.clearHistory();render();}).show());
-        head.addView(clear);
+        head.addView(clear,clp);
         int shown=0;
         for(Piece p:hist){
             if(shown++>=30) break;
             LinearLayout row=new LinearLayout(this);row.setOrientation(LinearLayout.VERTICAL);
             row.setPadding(0,dp(9),0,dp(2));
-            String label=(p.description==null||p.description.trim().isEmpty())?"Tirada #"+p.id:p.description;
+            String label=(p.description==null||p.description.trim().isEmpty())?p.label():p.description;
             row.addView(txt(label,14,dark,true));
             String ovenName=names.containsKey(p.ovenId)?names.get(p.ovenId):"Horno eliminado";
             row.addView(txt(ovenName+" · "+fmt.format(new Date(p.start)),12,grey,false));
             row.addView(txt(p.details(),12,blue,false));
+            LinearLayout acts=new LinearLayout(this);acts.setOrientation(LinearLayout.HORIZONTAL);
+            LinearLayout.LayoutParams ap=new LinearLayout.LayoutParams(-1,-2);ap.topMargin=dp(4);
+            row.addView(acts,ap);
+            Button ed=button("EDITAR",0xffeef2f7,dark);
+            acts.addView(ed,new LinearLayout.LayoutParams(0,dp(34),1));
+            ed.setOnClickListener(v->editPiece(p,ovenOf(ovens,p.ovenId)));
+            Button rm=button("BORRAR",0xfffbe3e0,red);
+            LinearLayout.LayoutParams rmp=new LinearLayout.LayoutParams(0,dp(34),1);rmp.leftMargin=dp(8);
+            acts.addView(rm,rmp);
+            rm.setOnClickListener(v-> new AlertDialog.Builder(this).setTitle("¿Borrar esta tirada del historial?")
+                .setMessage("Se quitará de la lista para siempre. No afecta a las tiradas en curso.")
+                .setNegativeButton("Cancelar",null)
+                .setPositiveButton("Borrar",(d,w)->{db.delete(p.id);render();}).show());
             panel.addView(row);
         }
         return panel;
+    }
+
+    /** Horno de una tirada; si el horno ya no existe se devuelve uno vacío para poder editar la fila. */
+    private Oven ovenOf(List<Oven> ovens,long id){
+        for(Oven o:ovens) if(o.id==id) return o;
+        return new Oven(id,"Horno eliminado",60,"","","");
+    }
+
+    /** Guarda el historial completo en un CSV (separador ';' para que Excel en español lo abra bien). */
+    private void exportCsv(){
+        Intent i=new Intent(Intent.ACTION_CREATE_DOCUMENT)
+            .addCategory(Intent.CATEGORY_OPENABLE)
+            .setType("text/csv")
+            .putExtra(Intent.EXTRA_TITLE,"tiradas_hornos.csv");
+        try{ startActivityForResult(i,REQ_CSV); }
+        catch(Exception e){ toast("Este móvil no permite guardar archivos."); }
+    }
+
+    private void writeCsv(Uri target){
+        final List<Oven> ovens=db.ovens();
+        final List<Piece> hist=db.history();
+        new Thread(()->{
+            boolean ok=true;
+            try(java.io.OutputStream os=getContentResolver().openOutputStream(target,"wt")){
+                if(os==null) ok=false;
+                else os.write(csvText(ovens,hist).getBytes("UTF-8"));
+            }catch(Exception e){ ok=false; }
+            final boolean done=ok;
+            runOnUiThread(()->toast(done?"Historial exportado ("+hist.size()+" tiradas).":"No se pudo escribir el archivo."));
+        }).start();
+    }
+
+    private String csvText(List<Oven> ovens,List<Piece> hist){
+        Map<Long,String> names=new HashMap<>();
+        for(Oven o:ovens) names.put(o.id,o.name);
+        StringBuilder sb=new StringBuilder("\uFEFF"); // BOM: sin él Excel rompe los acentos
+        sb.append("Horno;Descripcion;Entrada;Salida;Duracion;Temperatura;Curva;Formato\n");
+        for(Piece p:hist){
+            sb.append(csv(names.containsKey(p.ovenId)?names.get(p.ovenId):"Horno eliminado")).append(';')
+              .append(csv(p.description)).append(';')
+              .append(csv(fmt.format(new Date(p.start)))).append(';')
+              .append(csv(fmt.format(new Date(p.end)))).append(';')
+              .append(csv(Db.dur(p.duration))).append(';')
+              .append(csv(p.temp)).append(';').append(csv(p.curve)).append(';').append(csv(p.format)).append('\n');
+        }
+        return sb.toString();
+    }
+
+    private static String csv(String s){
+        if(s==null) return "";
+        if(s.indexOf(';')<0&&s.indexOf('"')<0&&s.indexOf('\n')<0) return s;
+        return "\""+s.replace("\"","\"\"")+"\"";
     }
 
     private LinearLayout card(){
@@ -297,9 +398,15 @@ public class MainActivity extends Activity {
         row.addView(running,runp);
         running.setOnClickListener(v->addRunningDialog(oven));
 
+        LinearLayout tools=new LinearLayout(this);tools.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams tp=new LinearLayout.LayoutParams(-1,dp(36));tp.topMargin=dp(8);
+        panel.addView(tools,tp);
+        Button reset=button("REINICIAR Nº",0xffeef2f7,dark);
+        tools.addView(reset,new LinearLayout.LayoutParams(0,dp(36),1));
+        reset.setOnClickListener(v->resetCounterDialog(oven));
         Button del=button("ELIMINAR HORNO",0xfffbe3e0,red);
-        LinearLayout.LayoutParams delp=new LinearLayout.LayoutParams(-1,dp(36));delp.topMargin=dp(8);
-        panel.addView(del,delp);del.setOnClickListener(v->deleteOvenDialog(oven));
+        LinearLayout.LayoutParams delp=new LinearLayout.LayoutParams(0,dp(36),1);delp.leftMargin=dp(8);
+        tools.addView(del,delp);del.setOnClickListener(v->deleteOvenDialog(oven));
 
         List<Piece> pieces=db.forOven(oven.id);
         if(pieces.isEmpty()){
@@ -325,7 +432,7 @@ public class MainActivity extends Activity {
         card.setPadding(dp(12),dp(12),dp(12),dp(12));card.setBackground(round(0xfff5f8fc,dp(10)));
         LinearLayout.LayoutParams cp=new LinearLayout.LayoutParams(-1,-2);cp.topMargin=dp(10);card.setLayoutParams(cp);
 
-        String label=(p.description==null||p.description.trim().isEmpty())?"Tirada #"+p.id:p.description;
+        String label=(p.description==null||p.description.trim().isEmpty())?p.label():p.description;
         TextView name=txt(label,16,dark,true);card.addView(name);
         TextView times=txt("Entrada: "+fmt.format(new Date(p.start))+"\nSalida prevista: "+fmt.format(new Date(p.end)),12,grey,false);
         times.setPadding(0,dp(5),0,dp(3));card.addView(times);
@@ -359,6 +466,7 @@ public class MainActivity extends Activity {
             .setPositiveButton("Sí, recogida",(d,w)->{
                 AlarmUtil.cancel(this,p.id);
                 ((NotificationManager)getSystemService(NOTIFICATION_SERVICE)).cancel((int)p.id);
+                RingService.stop(this);
                 db.markDone(p.id); render();
             })
             .show());
@@ -403,6 +511,16 @@ public class MainActivity extends Activity {
         d.show();
         d.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE);
     }
+    private void resetCounterDialog(Oven oven){
+        new AlertDialog.Builder(this).setTitle("Reiniciar el contador de "+oven.name)
+            .setMessage("La próxima tirada de este horno volverá a ser la nº 1.\n\nNo se borra nada: las tiradas en curso y el historial se quedan como están.")
+            .setNegativeButton("Cancelar",null)
+            .setPositiveButton("Reiniciar",(d,w)->{
+                db.resetCounter(oven.id);
+                render();
+                toast("Contador de "+oven.name+" reiniciado. La próxima será la nº 1.");
+            }).show();
+    }
     private void deleteOvenDialog(Oven oven){
         boolean hasPieces=db.ovenHasPieces(oven.id);
         String msg = hasPieces
@@ -446,7 +564,7 @@ public class MainActivity extends Activity {
         long id=db.add(oven.id,now,end,"",oven.minutes,oven.temp,oven.curve,oven.format);
         if(id<0){toast("No se pudo guardar la tirada. Inténtalo de nuevo.");return;}
         boolean exact=AlarmUtil.schedule(this,
-            new Piece(id,oven.id,now,end,"",oven.minutes,oven.temp,oven.curve,oven.format,false),oven.name);
+            new Piece(id,oven.id,now,end,"",oven.minutes,oven.temp,oven.curve,oven.format,false,0),oven.name);
         render();
         toast(exact?"Tirada guardada. Aviso a las "+fmt.format(new Date(end))+"."
                    :"Tirada guardada. El aviso será aproximado (faltan alarmas exactas).");
@@ -476,7 +594,7 @@ public class MainActivity extends Activity {
             long id=db.add(oven.id,start,end,text,oven.minutes,oven.temp,oven.curve,oven.format);
             if(id<0){toast("No se pudo guardar la tirada. Inténtalo de nuevo.");return;}
             AlarmUtil.schedule(this,
-                new Piece(id,oven.id,start,end,text,oven.minutes,oven.temp,oven.curve,oven.format,false),oven.name);
+                new Piece(id,oven.id,start,end,text,oven.minutes,oven.temp,oven.curve,oven.format,false,0),oven.name);
             d.dismiss();render();
             toast("Tirada guardada. Sale a las "+fmt.format(new Date(end))+".");
         }));
@@ -554,9 +672,10 @@ public class MainActivity extends Activity {
             db.updatePiece(p.id,start,end,text);
             AlarmUtil.cancel(this,p.id);
             ((NotificationManager)getSystemService(NOTIFICATION_SERVICE)).cancel((int)p.id);
-            if(end>System.currentTimeMillis())
+            // Una tirada del historial no vuelve a sonar aunque se le cambie la fecha.
+            if(!p.done && end>System.currentTimeMillis())
                 AlarmUtil.schedule(this,
-                    new Piece(p.id,oven.id,start,end,text,duration,p.temp,p.curve,p.format,false),oven.name);
+                    new Piece(p.id,oven.id,start,end,text,duration,p.temp,p.curve,p.format,false,p.numero),oven.name);
             d.dismiss();render();
         }));
         d.show();
