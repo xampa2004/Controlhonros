@@ -40,7 +40,11 @@ public class AlarmReceiver extends BroadcastReceiver {
 
     @Override public void onReceive(Context context, Intent intent){
         if(intent!=null && STOP_RING.equals(intent.getAction())){
+            // Parada manual: se calla el aviso y se quita la notificación.
             RingService.stop(context);
+            long id=intent.getLongExtra("piece_id",0);
+            if(id!=0) try{ ((NotificationManager)context.getSystemService(Context.NOTIFICATION_SERVICE)).cancel((int)id); }
+            catch(Exception ignored){}
             return;
         }
         // Una alarma nunca debe tumbar la app: si algo falla, ese aviso se pierde y ya está.
@@ -76,14 +80,19 @@ public class AlarmReceiver extends BroadcastReceiver {
             : new Notification.Builder(context).setSound(sound(context));
 
         String line=(desc==null||desc.trim().isEmpty())?"":(" · "+desc);
+        // Parar a mano desde la propia notificación, sin abrir la app.
+        PendingIntent stopPi=PendingIntent.getBroadcast(context,(int)id+1000,
+            new Intent(context,AlarmReceiver.class).setAction(STOP_RING).putExtra("piece_id",id),
+            PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
         Notification n=b.setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
             .setContentTitle(ovenName+": ciclo terminado")
             .setContentText("La tirada ha llegado a su hora prevista"+line)
             .setStyle(new Notification.BigTextStyle().bigText("La tirada de "+ovenName+" ha llegado a su hora prevista."+line))
+            .addAction(new Notification.Action.Builder(android.R.drawable.ic_lock_silent_mode,"PARAR",stopPi).build())
             .setAutoCancel(true)
             .setContentIntent(pi)
             .setDeleteIntent(PendingIntent.getBroadcast(context,(int)id,
-                new Intent(context,AlarmReceiver.class).setAction(STOP_RING),
+                new Intent(context,AlarmReceiver.class).setAction(STOP_RING).putExtra("piece_id",id),
                 PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE))
             .setCategory(Notification.CATEGORY_ALARM)
             .setPriority(Notification.PRIORITY_MAX)

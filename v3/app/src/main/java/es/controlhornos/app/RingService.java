@@ -9,20 +9,15 @@ import android.os.*;
 import android.util.Log;
 
 /**
- * Insiste con el aviso hasta que se atiende: suena una vez y vuelve a sonar un minuto después,
- * así hasta cuatro minutos. Se para antes si se abre la app o se descarta la notificación.
+ * Insiste con el aviso hasta que se para a mano: suena una vez y vuelve a sonar un minuto después,
+ * sin límite de tiempo. Se para al abrir la app, al pulsar RECOGIDA o al descartar la notificación.
  */
 public class RingService extends Service {
     private static final long GAP_MS=60000L;       // espera entre un aviso y el siguiente
-    private static final long MAX_MS=4*60000L;     // deja de insistir a los 4 minutos
     private MediaPlayer player;
     private Vibrator vibrator;
     private final Handler handler=new Handler(Looper.getMainLooper());
     private final Runnable ring=()->play();
-    private final Runnable timeout=()->{
-        try{ stopForeground(STOP_FOREGROUND_DETACH); }catch(Exception ignored){}
-        stopSelf();
-    };
 
     /** Arranca en primer plano con la notificación del aviso ya construida. */
     static void start(Context c,int notifId,Notification n){
@@ -60,9 +55,6 @@ public class RingService extends Service {
         // aquí solo se prepara la repetición, para no sonar dos veces a la vez.
         handler.removeCallbacks(ring);
         handler.postDelayed(ring,GAP_MS);
-        handler.removeCallbacks(timeout);
-        // Cuatro minutos de insistencia, más lo que tarde el último aviso en sonar entero.
-        handler.postDelayed(timeout,MAX_MS+45000L);
         return START_NOT_STICKY;
     }
 
@@ -107,7 +99,6 @@ public class RingService extends Service {
     }
 
     @Override public void onDestroy(){
-        handler.removeCallbacks(timeout);
         handler.removeCallbacks(ring);
         stopPlaying();
         super.onDestroy();
