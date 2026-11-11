@@ -9,14 +9,16 @@ import android.os.*;
 import android.util.Log;
 
 /**
- * Insiste con el sonido y la vibración del aviso hasta que se atiende.
- * Se para al abrir la app, al descartar la notificación o a los 5 minutos.
+ * Insiste con el aviso hasta que se atiende: suena una vez y vuelve a sonar un minuto después,
+ * así hasta una hora. Se para antes si se abre la app o se descarta la notificación.
  */
 public class RingService extends Service {
-    private static final long MAX_MS=5*60000L;
+    private static final long GAP_MS=60000L;       // espera entre un aviso y el siguiente
+    private static final long MAX_MS=60*60000L;    // deja de insistir tras una hora
     private MediaPlayer player;
     private Vibrator vibrator;
     private final Handler handler=new Handler(Looper.getMainLooper());
+    private final Runnable ring=()->play();
     private final Runnable timeout=()->{
         try{ stopForeground(STOP_FOREGROUND_DETACH); }catch(Exception ignored){}
         stopSelf();
@@ -60,9 +62,12 @@ public class RingService extends Service {
         return START_NOT_STICKY;
     }
 
+    /** Un aviso: el tono entero una sola vez (sin bucle) y la vibración de ese aviso. */
     private void play(){
         stopPlaying();
+        handler.removeCallbacks(ring);
         Uri u=AlarmReceiver.sound(this);
+        boolean suena=false;
         if(u!=null){
             try{
                 player=new MediaPlayer();
@@ -71,9 +76,11 @@ public class RingService extends Service {
                     .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
                     .build());
                 player.setDataSource(this,u);
-                player.setLooping(true);
+                player.setLooping(false);
+                player.setOnCompletionListener(mp-> handler.postDelayed(ring,GAP_MS));
                 player.prepare();
                 player.start();
+                suena=true;
             }catch(Exception e){
                 Log.w("RingService","no se pudo reproducir "+u,e);
                 releasePlayer();
@@ -82,9 +89,11 @@ public class RingService extends Service {
         if(AlarmReceiver.vibrate(this)){
             try{
                 vibrator=(Vibrator)getSystemService(VIBRATOR_SERVICE);
-                vibrator.vibrate(VibrationEffect.createWaveform(new long[]{0,700,500},0));
+                vibrator.vibrate(VibrationEffect.createWaveform(new long[]{0,700,500},-1));
             }catch(Exception ignored){}
         }
+        // Sin tono (silencio o error) no hay fin de reproducción que avise: se reprograma aquí.
+        if(!suena) handler.postDelayed(ring,GAP_MS);
     }
 
     private void releasePlayer(){
@@ -97,6 +106,7 @@ public class RingService extends Service {
 
     @Override public void onDestroy(){
         handler.removeCallbacks(timeout);
+        handler.removeCallbacks(ring);
         stopPlaying();
         super.onDestroy();
     }

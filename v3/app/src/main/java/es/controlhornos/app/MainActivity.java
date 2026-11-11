@@ -108,7 +108,7 @@ public class MainActivity extends Activity {
             boolean on=!AlarmReceiver.repeat(this);
             getSharedPreferences("ajustes",0).edit().putString("repetir",on?"1":"0").apply();
             repeatButton.setText(repeatLabel());
-            toast(on?"El sonido insistirá hasta que atiendas el aviso (máximo 5 minutos)."
+            toast(on?"El aviso sonará y volverá a sonar un minuto después hasta que lo atiendas (máximo 1 hora)."
                    :"El sonido sonará una sola vez.");
         });
         vibrateButton=button(vibrateLabel(),0xffe3edf7,dark);
