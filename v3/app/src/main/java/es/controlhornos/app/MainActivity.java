@@ -11,6 +11,11 @@ import android.provider.Settings;
 import android.text.InputType;
 import android.view.*;
 import android.widget.*;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.text.SimpleDateFormat;
 import java.util.*;
 
@@ -51,9 +56,21 @@ public class MainActivity extends Activity {
     @Override protected void onResume(){
         super.onResume();
         RingService.stop(this); // abrir la app es "atender" el aviso: se calla el sonido repetido
+        copiarSonidoAntiguo();
         render();
         handler.removeCallbacks(ticker);
         handler.postDelayed(ticker,1000);
+    }
+
+    /** Un sonido elegido en una versión anterior no tenía copia propia: se copia ahora una sola vez. */
+    private void copiarSonidoAntiguo(){
+        SharedPreferences prefs=getSharedPreferences("ajustes",0);
+        String uri=prefs.getString("alarma_uri",null);
+        if(uri==null||uri.isEmpty()) return;
+        if(prefs.getString("alarma_file",null)!=null) return;
+        if(uri.equals(prefs.getString("copia_intentada",null))) return;
+        prefs.edit().putString("copia_intentada",uri).apply();
+        copySound(Uri.parse(uri));
     }
     @Override protected void onPause(){super.onPause();handler.removeCallbacks(ticker);}
     @Override protected void onDestroy(){super.onDestroy();if(db!=null)db.close();}
@@ -149,8 +166,35 @@ public class MainActivity extends Activity {
         if(req!=REQ_SOUND||res!=RESULT_OK||data==null) return;
         Uri picked=data.getParcelableExtra(RingtoneManager.EXTRA_RINGTONE_PICKED_URI);
         getSharedPreferences("ajustes",0).edit().putString("alarma_uri",picked==null?"":picked.toString()).apply();
+        copySound(picked);
         soundButton.setText("SONIDO DEL AVISO: "+soundName());
-        toast("Sonido guardado: "+soundName()+". Se aplica al siguiente aviso.");
+    }
+
+    /**
+     * Copia el audio elegido a almacenamiento propio. Así el aviso lo reproduce la app (funciona con
+     * cualquier MP3, sin depender de permisos ni de que el sistema pueda leer ese archivo).
+     */
+    private void copySound(Uri picked){
+        SharedPreferences prefs=getSharedPreferences("ajustes",0);
+        File dst=new File(getFilesDir(),"sonido_aviso");
+        if(picked==null||"settings".equals(picked.getAuthority())){
+            prefs.edit().remove("alarma_file").apply(); // silencio o sonido del sistema: sin copia
+            if(picked!=null) toast("Sonido guardado: "+soundName()+". Se aplica al siguiente aviso.");
+            return;
+        }
+        new Thread(()->{
+            try(InputStream in=getContentResolver().openInputStream(picked);
+                OutputStream out=new FileOutputStream(dst)){
+                if(in==null) throw new IOException("sin acceso");
+                byte[] buf=new byte[8192];int n;
+                while((n=in.read(buf))>0) out.write(buf,0,n);
+                prefs.edit().putString("alarma_file",dst.getAbsolutePath()).apply();
+                runOnUiThread(()->toast("Sonido guardado: "+soundName()+". Se aplica al siguiente aviso."));
+            }catch(Exception e){
+                prefs.edit().remove("alarma_file").apply();
+                runOnUiThread(()->toast("No se pudo copiar ese audio; se usará el sonido del sistema."));
+            }
+        }).start();
     }
 
     private String repeatLabel(){ return "REPETIR: "+(AlarmReceiver.repeat(this)?"SÍ":"NO"); }

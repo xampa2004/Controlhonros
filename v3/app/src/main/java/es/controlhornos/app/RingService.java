@@ -51,10 +51,9 @@ public class RingService extends Service {
         }catch(Exception e){
             Log.w("RingService","sin primer plano",e);
         }
-        // El primer aviso ya lo da la notificación (su canal trae sonido y vibración):
-        // aquí solo se prepara la repetición, para no sonar dos veces a la vez.
+        // Con audio propio el primer aviso lo da el servicio; si no, ya lo dio el canal de la notificación.
         handler.removeCallbacks(ring);
-        handler.postDelayed(ring,GAP_MS);
+        handler.postDelayed(ring,AlarmReceiver.soundFile(this)!=null?0:GAP_MS);
         return START_NOT_STICKY;
     }
 
@@ -62,26 +61,37 @@ public class RingService extends Service {
     private void play(){
         stopPlaying();
         handler.removeCallbacks(ring);
-        Uri u=AlarmReceiver.sound(this);
-        if(u!=null){
+        boolean repeat=AlarmReceiver.repeat(this);
+        String file=AlarmReceiver.soundFile(this);
+        Uri u=file==null?AlarmReceiver.sound(this):null;
+        if(file!=null||u!=null){
             try{
                 player=new MediaPlayer();
                 player.setAudioAttributes(new AudioAttributes.Builder()
                     .setUsage(AudioAttributes.USAGE_ALARM)
                     .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
                     .build());
-                player.setDataSource(this,u);
+                if(file!=null) player.setDataSource(file); else player.setDataSource(this,u);
                 player.setLooping(false);
                 player.prepare();
+                if(!repeat){
+                    // Un solo aviso: al acabar el tono se retira el servicio y queda la notificación.
+                    player.setOnCompletionListener(mp->{
+                        try{ stopForeground(STOP_FOREGROUND_DETACH); }catch(Exception ignored){}
+                        stopSelf();
+                    });
+                }
                 player.start();
-                // Siguiente aviso un minuto después de que empiece éste (y nunca encima del actual).
-                handler.postDelayed(ring,Math.max(GAP_MS,player.getDuration()+1000L));
+                if(repeat){
+                    // Siguiente aviso un minuto después de que empiece éste (y nunca encima del actual).
+                    handler.postDelayed(ring,Math.max(GAP_MS,player.getDuration()+1000L));
+                }
             }catch(Exception e){
-                Log.w("RingService","no se pudo reproducir "+u,e);
+                Log.w("RingService","no se pudo reproducir "+(file!=null?file:u),e);
                 releasePlayer();
             }
         }
-        if(player==null) handler.postDelayed(ring,GAP_MS); // silencio o error: se reintenta igual
+        if(repeat && player==null) handler.postDelayed(ring,GAP_MS); // silencio o error: se reintenta igual
         if(AlarmReceiver.vibrate(this)){
             try{
                 vibrator=(Vibrator)getSystemService(VIBRATOR_SERVICE);

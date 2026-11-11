@@ -25,7 +25,9 @@ public class AlarmReceiver extends BroadcastReceiver {
     static String channelId(Context c){
         String s=c.getSharedPreferences("ajustes",0).getString("alarma_uri",null);
         String vib=vibrate(c)?"v":"nv";
-        return s==null?CHANNEL+"_"+vib:CHANNEL+"_"+vib+"_"+Integer.toHexString(s.hashCode());
+        // "f" = audio propio: el canal va en silencio y suena el servicio, así no se duplica el sonido.
+        String own=soundFile(c)!=null?"f":"";
+        return s==null?CHANNEL+"_"+vib+own:CHANNEL+"_"+vib+own+"_"+Integer.toHexString(s.hashCode());
     }
     /** Sonido elegido: null (preferencia ausente) = alarma del sistema; vacío = sin sonido. */
     static Uri sound(Context c){
@@ -36,6 +38,13 @@ public class AlarmReceiver extends BroadcastReceiver {
         }
         if(s.isEmpty()) return null;
         return Uri.parse(s);
+    }
+
+    /** Copia propia del audio elegido (los MP3 suenan siempre, sin permisos de por medio). */
+    static String soundFile(Context c){
+        String p=c.getSharedPreferences("ajustes",0).getString("alarma_file",null);
+        if(p==null||p.isEmpty()) return null;
+        return new java.io.File(p).isFile()?p:null;
     }
 
     @Override public void onReceive(Context context, Intent intent){
@@ -58,16 +67,18 @@ public class AlarmReceiver extends BroadcastReceiver {
         String desc=intent.getStringExtra("description");
 
         NotificationManager nm=(NotificationManager)context.getSystemService(Context.NOTIFICATION_SERVICE);
+        String own=soundFile(context);
         if(Build.VERSION.SDK_INT>=26){
             NotificationChannel ch=new NotificationChannel(channelId(context),"Fin de ciclo",NotificationManager.IMPORTANCE_HIGH);
             ch.setDescription("Avisos cuando termina una tirada");
-            ch.enableVibration(vibrate(context));
+            // Con audio propio suena el servicio; si no, el sonido va en el canal (una sola vez).
+            ch.enableVibration(own==null && vibrate(context));
             Uri sound=sound(context);
             android.media.AudioAttributes attrs=new android.media.AudioAttributes.Builder()
                 .setUsage(android.media.AudioAttributes.USAGE_ALARM)
                 .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
                 .build();
-            ch.setSound(sound,attrs); // null = sin sonido
+            ch.setSound(own!=null?null:sound,attrs); // null = sin sonido
             nm.createNotificationChannel(ch);
         }
 
@@ -98,8 +109,8 @@ public class AlarmReceiver extends BroadcastReceiver {
             .setPriority(Notification.PRIORITY_MAX)
             .build();
 
-        if(repeat(context)){
-            // El servicio insiste con el sonido hasta que se atiende la notificación o se abre la app.
+        if(repeat(context) || own!=null){
+            // El servicio insiste con el sonido (o lo da él cuando el audio es propio) hasta pararlo a mano.
             RingService.start(context,(int)id,n);
         } else {
             try{ nm.notify((int)id,n); } catch(SecurityException ignored){}
