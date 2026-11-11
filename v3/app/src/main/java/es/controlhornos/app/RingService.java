@@ -81,8 +81,8 @@ public class RingService extends Service {
                 player.setLooping(false);
                 player.prepare();
                 player.start();
-                // Siguiente aviso un minuto después de que empiece éste, no de que acabe.
-                handler.postDelayed(ring,Math.max(1000L,GAP_MS-player.getDuration()));
+                // Siguiente aviso un minuto después de que empiece éste (y nunca encima del actual).
+                handler.postDelayed(ring,Math.max(GAP_MS,player.getDuration()+1000L));
             }catch(Exception e){
                 Log.w("RingService","no se pudo reproducir "+u,e);
                 releasePlayer();
