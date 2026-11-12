@@ -24,6 +24,8 @@ public class MainActivity extends Activity {
     private LinearLayout root, content;
     private TextView permissionBanner;
     private Button soundButton;
+    private LinearLayout settingsPanel;
+    private boolean settings;
     private Button repeatButton;
     private Button vibrateButton;
     private static final int REQ_SOUND=20;
@@ -99,26 +101,38 @@ public class MainActivity extends Activity {
         scroll.addView(root);setContentView(scroll);
         scroll.requestApplyInsets();
 
-        TextView title=txt("CONTROL DE HORNOS",24,dark,true);root.addView(title);
+        LinearLayout titleRow=new LinearLayout(this);titleRow.setOrientation(LinearLayout.HORIZONTAL);
+        titleRow.setGravity(Gravity.CENTER_VERTICAL);root.addView(titleRow);
+        TextView title=txt("CONTROL DE HORNOS",24,dark,true);
+        titleRow.addView(title,new LinearLayout.LayoutParams(0,-2,1));
+        Button gear=button("⚙",0xffe3edf7,dark);
+        gear.setTextSize(22);
+        gear.setOnClickListener(v->showSettings(!settings));
+        titleRow.addView(gear,new LinearLayout.LayoutParams(dp(54),dp(44)));
         TextView sub=txt("Control de tiradas y avisos de fin de ciclo",14,grey,false);
         sub.setPadding(0,dp(4),0,dp(10));root.addView(sub);
 
+        settingsPanel=new LinearLayout(this);settingsPanel.setOrientation(LinearLayout.VERTICAL);
+        root.addView(settingsPanel);
+        TextView sh=txt("AJUSTES DEL AVISO",16,dark,true);
+        sh.setPadding(0,dp(2),0,dp(8));settingsPanel.addView(sh);
+
         permissionBanner=txt("",12,0xff7a4a00,true);
         permissionBanner.setPadding(dp(10),dp(8),dp(10),dp(8));
-        root.addView(permissionBanner,matchWrap());
+        settingsPanel.addView(permissionBanner,matchWrap());
 
         Button permissions=button("CONFIGURAR AVISOS DEL MÓVIL",0xffe3edf7,dark);
         permissions.setOnClickListener(v->openAlarmSettings());
         LinearLayout.LayoutParams pbp=matchWrap();pbp.topMargin=dp(8);
-        root.addView(permissions,pbp);
+        settingsPanel.addView(permissions,pbp);
 
         soundButton=button("SONIDO DEL AVISO: "+soundName(),0xffe3edf7,dark);
         soundButton.setOnClickListener(v->pickSound());
         LinearLayout.LayoutParams sbp=matchWrap();sbp.topMargin=dp(8);
-        root.addView(soundButton,sbp);
+        settingsPanel.addView(soundButton,sbp);
 
         LinearLayout toggles=new LinearLayout(this);toggles.setOrientation(LinearLayout.HORIZONTAL);
-        LinearLayout.LayoutParams tgp=matchWrap();tgp.topMargin=dp(8);root.addView(toggles,tgp);
+        LinearLayout.LayoutParams tgp=matchWrap();tgp.topMargin=dp(8);settingsPanel.addView(toggles,tgp);
         repeatButton=button(repeatLabel(),0xffe3edf7,dark);
         toggles.addView(repeatButton,new LinearLayout.LayoutParams(0,dp(44),1));
         repeatButton.setOnClickListener(v->{
@@ -141,9 +155,21 @@ public class MainActivity extends Activity {
         Button addOven=button("+ AÑADIR HORNO",0xffe3edf7,dark);
         LinearLayout.LayoutParams aop=matchWrap();aop.topMargin=dp(8);
         addOven.setOnClickListener(v->addOvenDialog());
-        root.addView(addOven,aop);
+        settingsPanel.addView(addOven,aop);
+        settingsPanel.setVisibility(View.GONE);
 
         content=new LinearLayout(this);content.setOrientation(LinearLayout.VERTICAL);root.addView(content);
+    }
+
+    /** Cambia entre la pantalla principal (hornos) y los ajustes del aviso. */
+    private void showSettings(boolean on){
+        settings=on;
+        settingsPanel.setVisibility(on?View.VISIBLE:View.GONE);
+        content.setVisibility(on?View.GONE:View.VISIBLE);
+    }
+    @Override public void onBackPressed(){
+        if(settings){showSettings(false);return;}
+        super.onBackPressed();
     }
 
     /** Selector del sistema: alarmas, tonos o silencio. */

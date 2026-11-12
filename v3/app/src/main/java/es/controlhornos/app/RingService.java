@@ -92,12 +92,23 @@ public class RingService extends Service {
             }
         }
         if(repeat && player==null) handler.postDelayed(ring,GAP_MS); // silencio o error: se reintenta igual
-        if(AlarmReceiver.vibrate(this)){
-            try{
+        if(AlarmReceiver.vibrate(this)) vibrateNow();
+    }
+
+    /** Vibración del aviso; en Android 12+ se marca como alarma para que el móvil no la silencie. */
+    private void vibrateNow(){
+        try{
+            VibrationEffect e=VibrationEffect.createWaveform(new long[]{0,700,500},-1);
+            if(Build.VERSION.SDK_INT>=31){
+                VibratorManager vm=(VibratorManager)getSystemService(VIBRATOR_MANAGER_SERVICE);
+                vibrator=vm.getDefaultVibrator();
+                vibrator.vibrate(e,new android.os.VibrationAttributes.Builder()
+                    .setUsage(android.os.VibrationAttributes.USAGE_ALARM).build());
+            } else {
                 vibrator=(Vibrator)getSystemService(VIBRATOR_SERVICE);
-                vibrator.vibrate(VibrationEffect.createWaveform(new long[]{0,700,500},-1));
-            }catch(Exception ignored){}
-        }
+                vibrator.vibrate(e);
+            }
+        }catch(Exception ignored){}
     }
 
     private void releasePlayer(){
