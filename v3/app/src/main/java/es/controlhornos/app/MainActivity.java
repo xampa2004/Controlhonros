@@ -10,6 +10,9 @@ import android.os.*;
 import android.provider.MediaStore;
 import android.provider.Settings;
 import android.text.InputType;
+import android.text.Spannable;
+import android.text.SpannableString;
+import android.text.style.StyleSpan;
 import android.view.*;
 import android.widget.*;
 import java.io.File;
@@ -26,10 +29,12 @@ public class MainActivity extends Activity {
     private LinearLayout root, content;
     private TextView permissionBanner;
     private Button soundButton;
-    private LinearLayout settingsPanel;
-    private boolean settings;
+    private LinearLayout settingsPanel, historyScreen;
+    private int screen; // 0 = principal, 1 = ajustes, 2 = historial
     private Button repeatButton;
     private Button vibrateButton;
+    private final SimpleDateFormat dayFmt=new SimpleDateFormat("dd/MM/yy",new Locale("es","ES"));
+    private final SimpleDateFormat timeFmt=new SimpleDateFormat("HH:mm",new Locale("es","ES"));
     private static final int REQ_SOUND=20;
     private static final int REQ_CSV=21;
     private static final int REQ_FILE=22;
@@ -120,10 +125,18 @@ public class MainActivity extends Activity {
         titleRow.addView(title,new LinearLayout.LayoutParams(0,-2,1));
         Button gear=button("⚙",0xffe3edf7,dark);
         gear.setTextSize(22);
-        gear.setOnClickListener(v->showSettings(!settings));
+        gear.setOnClickListener(v->showScreen(1));
         titleRow.addView(gear,new LinearLayout.LayoutParams(dp(54),dp(44)));
         TextView sub=txt("Control de tiradas y avisos de fin de ciclo",14,grey,false);
-        sub.setPadding(0,dp(4),0,dp(10));root.addView(sub);
+        sub.setPadding(0,dp(4),0,dp(6));root.addView(sub);
+
+        Button hist=button("HISTORIAL DE TIRADAS",0xffe3edf7,dark);
+        hist.setOnClickListener(v->showScreen(2));
+        LinearLayout.LayoutParams hp=matchWrap();hp.bottomMargin=dp(10);
+        root.addView(hist,hp);
+
+        historyScreen=new LinearLayout(this);historyScreen.setOrientation(LinearLayout.VERTICAL);
+        historyScreen.setVisibility(View.GONE);root.addView(historyScreen);
 
         settingsPanel=new LinearLayout(this);settingsPanel.setOrientation(LinearLayout.VERTICAL);
         root.addView(settingsPanel);
@@ -182,14 +195,16 @@ public class MainActivity extends Activity {
         content=new LinearLayout(this);content.setOrientation(LinearLayout.VERTICAL);root.addView(content);
     }
 
-    /** Cambia entre la pantalla principal (hornos) y los ajustes del aviso. */
-    private void showSettings(boolean on){
-        settings=on;
-        settingsPanel.setVisibility(on?View.VISIBLE:View.GONE);
-        content.setVisibility(on?View.GONE:View.VISIBLE);
+    /** Cambia entre la pantalla principal (hornos), los ajustes del aviso y el historial. */
+    private void showScreen(int s){
+        screen=s;
+        settingsPanel.setVisibility(s==1?View.VISIBLE:View.GONE);
+        historyScreen.setVisibility(s==2?View.VISIBLE:View.GONE);
+        content.setVisibility(s==0?View.VISIBLE:View.GONE);
+        if(s==2) renderHistory();
     }
     @Override public void onBackPressed(){
-        if(settings){showSettings(false);return;}
+        if(screen!=0){showScreen(0);return;}
         super.onBackPressed();
     }
 
@@ -397,6 +412,7 @@ public class MainActivity extends Activity {
     private void render(){
         if(content==null) return;
         updatePermissionBanner();
+        if(screen==2){renderHistory();return;}
         content.removeAllViews();
         List<Oven> ovens=db.ovens();
         View tl=timelinePanel(ovens);
@@ -407,8 +423,6 @@ public class MainActivity extends Activity {
             return;
         }
         for(Oven oven:ovens) content.addView(ovenPanel(oven));
-        View hist=historyPanel(ovens);
-        if(hist!=null) content.addView(hist);
     }
 
     /** Todas las tiradas activas sobre el mismo eje de horas, aparte de las tarjetas de cada horno. */
@@ -426,15 +440,17 @@ public class MainActivity extends Activity {
         return panel;
     }
 
-    /** Tiradas ya recogidas, con la foto del ciclo que tenían al crearse. */
-    private View historyPanel(List<Oven> ovens){
+    /** Pantalla del historial: tiradas ya recogidas, con la foto del ciclo que tenían al crearse. */
+    private void renderHistory(){
+        historyScreen.removeAllViews();
+        List<Oven> ovens=db.ovens();
         List<Piece> hist=db.history();
-        if(hist.isEmpty()) return null;
         Map<Long,String> names=new HashMap<>();
         for(Oven o:ovens) names.put(o.id,o.name);
         LinearLayout panel=card();
+        historyScreen.addView(panel);
         LinearLayout head=new LinearLayout(this);head.setGravity(Gravity.CENTER_VERTICAL);panel.addView(head);
-        head.addView(txt("HISTORIAL",15,dark,true),new LinearLayout.LayoutParams(0,-2,1));
+        head.addView(txt("HISTORIAL",18,dark,true),new LinearLayout.LayoutParams(0,-2,1));
         Button csv=button("EXPORTAR",0xffe3edf7,dark);
         csv.setOnClickListener(v->exportCsv());
         head.addView(csv);
@@ -443,15 +459,20 @@ public class MainActivity extends Activity {
         clear.setOnClickListener(v-> new AlertDialog.Builder(this).setTitle("¿Vaciar el historial?")
             .setMessage("Se borrarán las "+hist.size()+" tiradas recogidas. Los hornos y las tiradas activas no se tocan.")
             .setNegativeButton("Cancelar",null)
-            .setPositiveButton("Vaciar",(d,w)->{db.clearHistory();render();}).show());
+            .setPositiveButton("Vaciar",(d,w)->{db.clearHistory();renderHistory();}).show());
         head.addView(clear,clp);
+        if(hist.isEmpty()){
+            TextView empty=txt("Todavía no hay tiradas recogidas. Cuando pulses RECOGIDA en una tirada, aparecerá aquí.",13,grey,false);
+            empty.setPadding(0,dp(12),0,0);panel.addView(empty);
+            return;
+        }
         int shown=0;
         for(Piece p:hist){
             if(shown++>=30) break;
             LinearLayout row=new LinearLayout(this);row.setOrientation(LinearLayout.VERTICAL);
             row.setPadding(0,dp(9),0,dp(2));
             String label=(p.description==null||p.description.trim().isEmpty())?p.label():p.description;
-            row.addView(txt(label,14,dark,true));
+            row.addView(txt(label+" "+dayFmt.format(new Date(p.start)),16,dark,true));
             String ovenName=names.containsKey(p.ovenId)?names.get(p.ovenId):"Horno eliminado";
             row.addView(txt(ovenName+" · "+fmt.format(new Date(p.start)),12,grey,false));
             row.addView(txt(p.details(),12,blue,false));
@@ -467,10 +488,9 @@ public class MainActivity extends Activity {
             rm.setOnClickListener(v-> new AlertDialog.Builder(this).setTitle("¿Borrar esta tirada del historial?")
                 .setMessage("Se quitará de la lista para siempre. No afecta a las tiradas en curso.")
                 .setNegativeButton("Cancelar",null)
-                .setPositiveButton("Borrar",(d,w)->{db.delete(p.id);render();}).show());
+                .setPositiveButton("Borrar",(d,w)->{db.delete(p.id);renderHistory();}).show());
             panel.addView(row);
         }
-        return panel;
     }
 
     /** Horno de una tirada; si el horno ya no existe se devuelve uno vacío para poder editar la fila. */
@@ -587,17 +607,42 @@ public class MainActivity extends Activity {
         return sb.length()==0?"TEMPERATURA, CURVA Y FORMATO (pulsa para definir)":sb.toString();
     }
 
+    /** Temperatura, curva y formato de la tirada (sin la duración: esa ya tiene su propia línea). */
+    private String extras(Piece p){
+        StringBuilder sb=new StringBuilder();
+        if(p.temp!=null&&!p.temp.isEmpty()) sb.append(p.temp);
+        if(p.curve!=null&&!p.curve.isEmpty()) sb.append(sb.length()>0?" · ":"").append("Curva ").append(p.curve);
+        if(p.format!=null&&!p.format.isEmpty()) sb.append(sb.length()>0?" · ":"").append(p.format);
+        return sb.toString();
+    }
+
     private View pieceCard(Piece p,Oven oven){
         LinearLayout card=new LinearLayout(this);card.setOrientation(LinearLayout.VERTICAL);
         card.setPadding(dp(12),dp(12),dp(12),dp(12));card.setBackground(round(0xfff5f8fc,dp(10)));
         LinearLayout.LayoutParams cp=new LinearLayout.LayoutParams(-1,-2);cp.topMargin=dp(10);card.setLayoutParams(cp);
 
         String label=(p.description==null||p.description.trim().isEmpty())?p.label():p.description;
-        TextView name=txt(label,16,dark,true);card.addView(name);
-        TextView times=txt("Entrada: "+fmt.format(new Date(p.start))+"\nSalida prevista: "+fmt.format(new Date(p.end)),12,grey,false);
-        times.setPadding(0,dp(5),0,dp(3));card.addView(times);
-        TextView det=txt(p.details(),12,blue,false);
-        det.setPadding(0,0,0,dp(7));card.addView(det);
+        TextView name=txt(label+" "+dayFmt.format(new Date(p.start)),21,dark,true);card.addView(name);
+        String in="Entrada: "+timeFmt.format(new Date(p.start));
+        String out="Salida prevista: "+timeFmt.format(new Date(p.end));
+        String cyc="Ciclo: "+Db.dur(p.duration>0?p.duration:oven.minutes);
+        String all=in+"\n"+out+"\n"+cyc;
+        SpannableString times=new SpannableString(all);
+        StyleSpan bold=new StyleSpan(android.graphics.Typeface.BOLD);
+        int at=0;
+        times.setSpan(bold,at+"Entrada: ".length(),at+in.length(),Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+        at+=in.length()+1;
+        times.setSpan(bold,at+"Salida prevista: ".length(),at+out.length(),Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+        at+=out.length()+1;
+        times.setSpan(bold,at+"Ciclo: ".length(),at+cyc.length(),Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+        TextView tv=txt("",18,grey,false);
+        tv.setText(times);
+        tv.setPadding(0,dp(5),0,dp(3));card.addView(tv);
+        String extra=extras(p);
+        if(!extra.isEmpty()){
+            TextView det=txt(extra,16,blue,false);
+            det.setPadding(0,0,0,dp(7));card.addView(det);
+        }
 
         long now=System.currentTimeMillis();
         long total=Math.max(1,p.end-p.start), elapsed=Math.max(0,Math.min(total,now-p.start));
@@ -608,7 +653,7 @@ public class MainActivity extends Activity {
         boolean finished = now>=p.end;
         boolean soon = !finished && (p.end-now)<=5*60000L; // últimos 5 minutos: destacar
         String status = finished ? "CICLO TERMINADO · pendiente de recogida" : "Progreso: "+percent+"% · Restante: "+remaining(p.end-now);
-        TextView st=txt(status,13, finished?0xffb45309:(soon?red:blue), true);
+        TextView st=txt(status,17, finished?0xffb45309:(soon?red:blue), true);
         st.setPadding(0,dp(6),0,dp(8));
         if(finished||soon) card.setBackground(round(0xfffdeeea,dp(10)));
         card.addView(st);
