@@ -51,9 +51,11 @@ public class RingService extends Service {
         }catch(Exception e){
             Log.w("RingService","sin primer plano",e);
         }
-        // Con audio propio el primer aviso lo da el servicio; si no, ya lo dio el canal de la notificación.
+        // El primer aviso lo da la notificación (canal con sonido). Solo lo da el servicio si el audio
+        // está únicamente en la copia privada, que el sistema no puede leer.
+        boolean servicePlaysFirst=AlarmReceiver.soundFile(this)!=null && AlarmReceiver.mediaSound(this)==null;
         handler.removeCallbacks(ring);
-        handler.postDelayed(ring,AlarmReceiver.soundFile(this)!=null?0:GAP_MS);
+        handler.postDelayed(ring,servicePlaysFirst?0:GAP_MS);
         return START_NOT_STICKY;
     }
 

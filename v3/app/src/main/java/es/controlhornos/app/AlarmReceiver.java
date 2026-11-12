@@ -23,11 +23,14 @@ public class AlarmReceiver extends BroadcastReceiver {
      * de un canal ya creado, así que cada combinación usa el suyo.
      */
     static String channelId(Context c){
-        String s=c.getSharedPreferences("ajustes",0).getString("alarma_uri",null);
-        String vib=vibrate(c)?"v":"nv";
-        // "f" = audio propio: el canal va en silencio y suena el servicio, así no se duplica el sonido.
-        String own=soundFile(c)!=null?"f":"";
-        return s==null?CHANNEL+"_"+vib+own:CHANNEL+"_"+vib+own+"_"+Integer.toHexString(s.hashCode());
+        SharedPreferences p=c.getSharedPreferences("ajustes",0);
+        String s=p.getString("alarma_uri",null);
+        Uri media=mediaSound(c);
+        StringBuilder id=new StringBuilder(CHANNEL).append('_').append(vibrate(c)?"v":"nv");
+        if(media!=null) id.append("_m").append(Integer.toHexString(media.toString().hashCode()));
+        else if(soundFile(c)!=null) id.append("_f");
+        else if(s!=null) id.append('_').append(Integer.toHexString(s.hashCode()));
+        return id.toString();
     }
     /** Sonido elegido: null (preferencia ausente) = alarma del sistema; vacío = sin sonido. */
     static Uri sound(Context c){
@@ -45,6 +48,15 @@ public class AlarmReceiver extends BroadcastReceiver {
         String p=c.getSharedPreferences("ajustes",0).getString("alarma_file",null);
         if(p==null||p.isEmpty()) return null;
         return new java.io.File(p).isFile()?p:null;
+    }
+
+    /**
+     * Copia del audio en el almacén multimedia (Descargas). Es la que usa el canal de la notificación:
+     * así el propio sistema suena el aviso aunque la app no pueda quedarse en segundo plano.
+     */
+    static Uri mediaSound(Context c){
+        String s=c.getSharedPreferences("ajustes",0).getString("alarma_media",null);
+        return s==null||s.isEmpty()?null:Uri.parse(s);
     }
 
     @Override public void onReceive(Context context, Intent intent){
@@ -68,17 +80,20 @@ public class AlarmReceiver extends BroadcastReceiver {
 
         NotificationManager nm=(NotificationManager)context.getSystemService(Context.NOTIFICATION_SERVICE);
         String own=soundFile(context);
+        Uri media=mediaSound(context);
         if(Build.VERSION.SDK_INT>=26){
             NotificationChannel ch=new NotificationChannel(channelId(context),"Fin de ciclo",NotificationManager.IMPORTANCE_HIGH);
             ch.setDescription("Avisos cuando termina una tirada");
-            // Con audio propio suena el servicio; si no, el sonido va en el canal (una sola vez).
-            ch.enableVibration(own==null && vibrate(context));
+            // La vibración va en el canal: así vibra aunque el servicio no llegue a arrancar.
+            ch.enableVibration(vibrate(context));
             Uri sound=sound(context);
             android.media.AudioAttributes attrs=new android.media.AudioAttributes.Builder()
                 .setUsage(android.media.AudioAttributes.USAGE_ALARM)
                 .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
                 .build();
-            ch.setSound(own!=null?null:sound,attrs); // null = sin sonido
+            // Con copia en el almacén multimedia suena el propio sistema; si solo hay copia privada,
+            // el canal va en silencio y suena el servicio (así no se duplica el sonido).
+            ch.setSound(media!=null?media:(own!=null?null:sound),attrs); // null = sin sonido
             nm.createNotificationChannel(ch);
         }
 

@@ -7,11 +7,13 @@ import android.content.pm.PackageManager;
 import android.media.RingtoneManager;
 import android.net.Uri;
 import android.os.*;
+import android.provider.MediaStore;
 import android.provider.Settings;
 import android.text.InputType;
 import android.view.*;
 import android.widget.*;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -69,7 +71,17 @@ public class MainActivity extends Activity {
         SharedPreferences prefs=getSharedPreferences("ajustes",0);
         String uri=prefs.getString("alarma_uri",null);
         if(uri==null||uri.isEmpty()) return;
-        if(prefs.getString("alarma_file",null)!=null) return;
+        String file=prefs.getString("alarma_file",null);
+        if(file!=null&&prefs.getString("alarma_media",null)==null){
+            // Ya había copia privada pero no la del almacén multimedia: se publica para que suene el sistema.
+            File src=new File(file);
+            if(src.isFile()) new Thread(()->{
+                String media=publishSound(src,Uri.parse(uri));
+                if(media!=null) prefs.edit().putString("alarma_media",media).apply();
+            }).start();
+            return;
+        }
+        if(file!=null) return;
         if(uri.equals(prefs.getString("copia_intentada",null))) return;
         prefs.edit().putString("copia_intentada",uri).apply();
         copySound(Uri.parse(uri));
@@ -130,6 +142,14 @@ public class MainActivity extends Activity {
         soundButton.setOnClickListener(v->pickSound());
         LinearLayout.LayoutParams sbp=matchWrap();sbp.topMargin=dp(8);
         settingsPanel.addView(soundButton,sbp);
+
+        // Dispara el aviso ahora mismo, para comprobar de un vistazo si suena y vibra.
+        Button test=button("PROBAR EL AVISO AHORA",0xffe3edf7,dark);
+        test.setOnClickListener(v->sendBroadcast(new Intent(this,AlarmReceiver.class)
+            .putExtra("piece_id",999999L).putExtra("oven_name","Prueba")
+            .putExtra("description","así sonará el aviso de fin de ciclo")));
+        LinearLayout.LayoutParams tbp=matchWrap();tbp.topMargin=dp(8);
+        settingsPanel.addView(test,tbp);
 
         LinearLayout toggles=new LinearLayout(this);toggles.setOrientation(LinearLayout.HORIZONTAL);
         LinearLayout.LayoutParams tgp=matchWrap();tgp.topMargin=dp(8);settingsPanel.addView(toggles,tgp);
@@ -197,14 +217,15 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * Copia el audio elegido a almacenamiento propio. Así el aviso lo reproduce la app (funciona con
-     * cualquier MP3, sin depender de permisos ni de que el sistema pueda leer ese archivo).
+     * Copia el audio elegido a almacenamiento propio (para las repeticiones) y además lo publica en
+     * el almacén multimedia del móvil, que es lo que permite que el propio sistema suene el aviso
+     * aunque la app no consiga quedarse en segundo plano.
      */
     private void copySound(Uri picked){
         SharedPreferences prefs=getSharedPreferences("ajustes",0);
         File dst=new File(getFilesDir(),"sonido_aviso");
         if(picked==null||"settings".equals(picked.getAuthority())){
-            prefs.edit().remove("alarma_file").apply(); // silencio o sonido del sistema: sin copia
+            prefs.edit().remove("alarma_file").remove("alarma_media").apply(); // silencio o sonido del sistema: sin copia
             if(picked!=null) toast("Sonido guardado: "+soundName()+". Se aplica al siguiente aviso.");
             return;
         }
@@ -215,12 +236,45 @@ public class MainActivity extends Activity {
                 byte[] buf=new byte[8192];int n;
                 while((n=in.read(buf))>0) out.write(buf,0,n);
                 prefs.edit().putString("alarma_file",dst.getAbsolutePath()).apply();
+                String media=publishSound(dst,picked);
+                if(media==null) prefs.edit().remove("alarma_media").apply();
+                else prefs.edit().putString("alarma_media",media).apply();
                 runOnUiThread(()->toast("Sonido guardado: "+soundName()+". Se aplica al siguiente aviso."));
             }catch(Exception e){
-                prefs.edit().remove("alarma_file").apply();
+                prefs.edit().remove("alarma_file").remove("alarma_media").apply();
                 runOnUiThread(()->toast("No se pudo copiar ese audio; se usará el sonido del sistema."));
             }
         }).start();
+    }
+
+    /**
+     * Deja el audio en Descargas (almacén multimedia) para que el sistema pueda reproducirlo como
+     * sonido de la notificación. Devuelve su URI, o null si este Android no lo permite.
+     */
+    private String publishSound(File src,Uri picked){
+        if(Build.VERSION.SDK_INT<29) return null; // Android 10+; antes haría falta permiso de escritura
+        try{
+            ContentResolver cr=getContentResolver();
+            String mime=cr.getType(picked);
+            if(mime==null||!mime.startsWith("audio/")) mime="audio/mpeg";
+            String ext=mime.startsWith("audio/mpeg")?"mp3":mime.substring(6);
+            String name="aviso_control_hornos."+ext;
+            cr.delete(MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+                MediaStore.MediaColumns.DISPLAY_NAME+"=?",new String[]{name}); // la copia anterior ya no sirve
+            ContentValues v=new ContentValues();
+            v.put(MediaStore.MediaColumns.DISPLAY_NAME,name);
+            v.put(MediaStore.MediaColumns.MIME_TYPE,mime);
+            v.put(MediaStore.MediaColumns.RELATIVE_PATH,"Download/ControlHornos");
+            Uri target=cr.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI,v);
+            if(target==null) return null;
+            try(InputStream in=new FileInputStream(src);
+                OutputStream out=cr.openOutputStream(target)){
+                if(out==null) return null;
+                byte[] buf=new byte[8192];int n;
+                while((n=in.read(buf))>0) out.write(buf,0,n);
+            }
+            return target.toString();
+        }catch(Exception e){ return null; }
     }
 
     private String repeatLabel(){ return "REPETIR: "+(AlarmReceiver.repeat(this)?"SÍ":"NO"); }
