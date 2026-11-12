@@ -32,6 +32,7 @@ public class MainActivity extends Activity {
     private Button vibrateButton;
     private static final int REQ_SOUND=20;
     private static final int REQ_CSV=21;
+    private static final int REQ_FILE=22;
     private final Handler handler=new Handler();
     private final SimpleDateFormat fmt=new SimpleDateFormat("dd/MM/yyyy HH:mm",new Locale("es","ES"));
     private final Runnable ticker=()->{render();handler.postDelayed(this.ticker,1000);};
@@ -84,7 +85,7 @@ public class MainActivity extends Activity {
         if(file!=null) return;
         if(uri.equals(prefs.getString("copia_intentada",null))) return;
         prefs.edit().putString("copia_intentada",uri).apply();
-        copySound(Uri.parse(uri));
+        copySound(Uri.parse(uri),false);
     }
     @Override protected void onPause(){super.onPause();handler.removeCallbacks(ticker);}
     @Override protected void onDestroy(){super.onDestroy();if(db!=null)db.close();}
@@ -209,11 +210,30 @@ public class MainActivity extends Activity {
             if(res==RESULT_OK&&data!=null&&data.getData()!=null) writeCsv(data.getData());
             return;
         }
+        if(req==REQ_FILE){
+            if(res==RESULT_OK&&data!=null&&data.getData()!=null) useSound(data.getData(),false);
+            return;
+        }
         if(req!=REQ_SOUND||res!=RESULT_OK||data==null) return;
-        Uri picked=data.getParcelableExtra(RingtoneManager.EXTRA_RINGTONE_PICKED_URI);
+        useSound(data.getParcelableExtra(RingtoneManager.EXTRA_RINGTONE_PICKED_URI),true);
+    }
+
+    /** Guarda el sonido elegido y lo copia. Si el selector del móvil no deja leer el audio, se pide el archivo. */
+    private void useSound(Uri picked,boolean askIfFails){
+        if(picked!=null){
+            try{ getContentResolver().takePersistableUriPermission(picked,Intent.FLAG_GRANT_READ_URI_PERMISSION); }
+            catch(Exception ignored){ } // el selector de tonos no concede permisos duraderos: no pasa nada
+        }
         getSharedPreferences("ajustes",0).edit().putString("alarma_uri",picked==null?"":picked.toString()).apply();
-        copySound(picked);
+        copySound(picked,askIfFails);
         soundButton.setText("SONIDO DEL AVISO: "+soundName());
+    }
+
+    /** Elige el MP3 directamente del almacenamiento: ese permiso de lectura sí es fiable en cualquier marca. */
+    private void pickFile(){
+        Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("audio/*");
+        try{ startActivityForResult(i,REQ_FILE); }
+        catch(Exception e){ toast("Este móvil no trae explorador de archivos."); }
     }
 
     /**
@@ -221,7 +241,7 @@ public class MainActivity extends Activity {
      * el almacén multimedia del móvil, que es lo que permite que el propio sistema suene el aviso
      * aunque la app no consiga quedarse en segundo plano.
      */
-    private void copySound(Uri picked){
+    private void copySound(Uri picked,boolean askIfFails){
         SharedPreferences prefs=getSharedPreferences("ajustes",0);
         File dst=new File(getFilesDir(),"sonido_aviso");
         if(picked==null||"settings".equals(picked.getAuthority())){
@@ -239,10 +259,18 @@ public class MainActivity extends Activity {
                 String media=publishSound(dst,picked);
                 if(media==null) prefs.edit().remove("alarma_media").apply();
                 else prefs.edit().putString("alarma_media",media).apply();
-                runOnUiThread(()->toast("Sonido guardado: "+soundName()+". Se aplica al siguiente aviso."));
+                runOnUiThread(()->toast(media==null
+                    ?"Sonido copiado: "+soundName()+". Ojo: este móvil no deja usarlo como aviso del sistema."
+                    :"Sonido guardado: "+soundName()+". Se aplica al siguiente aviso."));
             }catch(Exception e){
                 prefs.edit().remove("alarma_file").remove("alarma_media").apply();
-                runOnUiThread(()->toast("No se pudo copiar ese audio; se usará el sonido del sistema."));
+                runOnUiThread(()->{
+                    if(askIfFails){
+                        // Muchos selectores de marca devuelven un audio que solo ellos pueden leer.
+                        toast("Ese audio no se deja copiar. Elige el archivo desde el almacenamiento.");
+                        pickFile();
+                    } else toast("No se pudo copiar ese audio; se usará el sonido del sistema.");
+                });
             }
         }).start();
     }
@@ -286,8 +314,16 @@ public class MainActivity extends Activity {
         try{
             android.media.Ringtone r=RingtoneManager.getRingtone(this,Uri.parse(s));
             String t=r==null?null:r.getTitle(this);
-            return t==null||t.isEmpty()?"elegido":t;
-        }catch(Exception e){ return "elegido"; }
+            if(t!=null&&!t.isEmpty()) return t;
+        }catch(Exception ignored){}
+        // Un MP3 elegido del almacenamiento no tiene "título": se muestra su nombre de archivo.
+        try(android.database.Cursor c=getContentResolver().query(Uri.parse(s),null,null,null,null)){
+            if(c!=null&&c.moveToFirst()){
+                int i=c.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME);
+                if(i>=0&&c.getString(i)!=null) return c.getString(i);
+            }
+        }catch(Exception ignored){}
+        return "elegido";
     }
 
     private void requestNotificationPermissionIfNeeded(){
