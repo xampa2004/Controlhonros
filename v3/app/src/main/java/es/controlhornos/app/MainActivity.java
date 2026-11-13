@@ -474,7 +474,7 @@ public class MainActivity extends Activity {
             String label=(p.description==null||p.description.trim().isEmpty())?p.label():p.description;
             row.addView(txt(label+" "+dayFmt.format(new Date(p.start)),16,dark,true));
             String ovenName=names.containsKey(p.ovenId)?names.get(p.ovenId):"Horno eliminado";
-            row.addView(txt(ovenName+" · "+fmt.format(new Date(p.start)),12,grey,false));
+            row.addView(txt(ovenName+" · "+timeFmt.format(new Date(p.start)),12,grey,false));
             row.addView(txt(p.details(),12,blue,false));
             LinearLayout acts=new LinearLayout(this);acts.setOrientation(LinearLayout.HORIZONTAL);
             LinearLayout.LayoutParams ap=new LinearLayout.LayoutParams(-1,-2);ap.topMargin=dp(4);
